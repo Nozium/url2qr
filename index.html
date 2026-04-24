@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>url2qr relay</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --fg: #e6e6e6;
+    --muted: #8a93a6;
+    --accent: #7aa7ff;
+    --danger: #ff6b6b;
+    --ok: #4ade80;
+    --border: #2a2f3a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --fg: #14161c;
+      --muted: #5b6477;
+      --accent: #2a5bd7;
+      --danger: #c0392b;
+      --ok: #1f9d55;
+      --border: #dde1ea;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 1rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 1rem;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 0.25rem; }
+  .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+  input[type=text], input[type=password], textarea {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.95rem;
+  }
+  textarea { min-height: 80px; resize: vertical; }
+  .tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .tabs button {
+    flex: 1;
+    padding: 0.6rem 0.75rem;
+    background: var(--panel);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  .tabs button.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  button.primary {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.7rem 1rem;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary {
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 0.9rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .row { display: flex; gap: 0.5rem; align-items: center; }
+  .row > * { flex: 1; }
+  .row > button { flex: 0 0 auto; }
+  .qr-wrap {
+    display: flex;
+    justify-content: center;
+    padding: 1rem;
+    background: white;
+    border-radius: 8px;
+    margin-top: 1rem;
+  }
+  .qr-wrap canvas { display: block; max-width: 100%; height: auto; }
+  video {
+    width: 100%;
+    max-height: 60vh;
+    background: black;
+    border-radius: 8px;
+    object-fit: cover;
+  }
+  .status {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    min-height: 1.2em;
+  }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--danger); }
+  .result-box {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9rem;
+    word-break: break-all;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow: auto;
+  }
+  .hidden { display: none !important; }
+  footer { color: var(--muted); font-size: 0.75rem; margin-top: 1.5rem; text-align: center; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+  <h1>url2qr relay</h1>
+  <div class="subtitle">別端末で取得したコードをQR経由で戻すためのリレー。シード値を共有して暗号化。</div>
+
+  <div class="panel">
+    <label for="seed">共有シード (空ならプレーンテキスト)</label>
+    <div class="row">
+      <input id="seed" type="text" placeholder="e.g. my-session-2026" autocomplete="off" spellcheck="false">
+      <button id="seed-random" class="secondary" title="ランダム生成">🎲</button>
+    </div>
+    <div class="status" id="seed-status">URL末尾に <code>#seed=xxx</code> を付けると両端末で自動同期</div>
+  </div>
+
+  <div class="tabs">
+    <button id="tab-encode" class="active">📱 エンコード</button>
+    <button id="tab-decode">💻 デコード</button>
+  </div>
+
+  <section id="encode-section" class="panel">
+    <label for="plaintext">テキスト (ログインコードなどを貼り付け)</label>
+    <textarea id="plaintext" placeholder="ここに貼り付け..." autocomplete="off" spellcheck="false"></textarea>
+    <div class="row" style="margin-top: 0.75rem;">
+      <button id="encode-btn" class="primary">QRに変換</button>
+      <button id="encode-clear" class="secondary">クリア</button>
+    </div>
+    <div class="status" id="encode-status"></div>
+    <div id="qr-wrap" class="qr-wrap hidden">
+      <canvas id="qr-canvas"></canvas>
+    </div>
+  </section>
+
+  <section id="decode-section" class="panel hidden">
+    <video id="camera" playsinline muted></video>
+    <canvas id="decode-canvas" class="hidden"></canvas>
+    <div class="row" style="margin-top: 0.75rem;">
+      <button id="camera-start" class="primary">カメラを起動</button>
+      <button id="camera-stop" class="secondary hidden">停止</button>
+    </div>
+    <div class="status" id="decode-status"></div>
+    <div id="result-wrap" class="hidden">
+      <label style="margin-top: 0.75rem;">復号結果</label>
+      <div id="result" class="result-box"></div>
+      <div class="row" style="margin-top: 0.5rem;">
+        <button id="copy-btn" class="primary">クリップボードにコピー</button>
+        <button id="rescan-btn" class="secondary">もう一度スキャン</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    AES-GCM (PBKDF2-SHA256, 100k iters) · <a href="https://github.com/nozium/url2qr" style="color: var(--muted);">url2qr</a>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script>
+  (() => {
+    const MAGIC = 'u2q1:';
+
+    const $ = (id) => document.getElementById(id);
+    const seedInput = $('seed');
+    const encodeSection = $('encode-section');
+    const decodeSection = $('decode-section');
+    const tabEncode = $('tab-encode');
+    const tabDecode = $('tab-decode');
+
+    // ---- Seed handling ----
+    function readSeedFromHash() {
+      const h = location.hash.replace(/^#/, '');
+      const params = new URLSearchParams(h);
+      return params.get('seed') || '';
+    }
+    function writeSeedToHash(seed) {
+      const params = new URLSearchParams(location.hash.replace(/^#/, ''));
+      if (seed) params.set('seed', seed); else params.delete('seed');
+      const h = params.toString();
+      history.replaceState(null, '', location.pathname + location.search + (h ? '#' + h : ''));
+    }
+    seedInput.value = readSeedFromHash();
+    seedInput.addEventListener('input', () => writeSeedToHash(seedInput.value.trim()));
+    $('seed-random').addEventListener('click', () => {
+      const b = crypto.getRandomValues(new Uint8Array(9));
+      seedInput.value = btoa(String.fromCharCode(...b)).replace(/[+/=]/g, '').slice(0, 12);
+      writeSeedToHash(seedInput.value);
+    });
+
+    // ---- Crypto ----
+    async function deriveKey(seed, salt) {
+      const material = await crypto.subtle.importKey(
+        'raw', new TextEncoder().encode(seed), 'PBKDF2', false, ['deriveKey']
+      );
+      return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+        material,
+        { name: 'AES-GCM', length: 256 },
+        false, ['encrypt', 'decrypt']
+      );
+    }
+    function b64encode(bytes) {
+      let s = '';
+      for (const b of bytes) s += String.fromCharCode(b);
+      return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    function b64decode(s) {
+      s = s.replace(/-/g, '+').replace(/_/g, '/');
+      while (s.length % 4) s += '=';
+      const bin = atob(s);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    async function encryptText(seed, text) {
+      if (!seed) return text;
+      const salt = crypto.getRandomValues(new Uint8Array(8));
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const key = await deriveKey(seed, salt);
+      const ct = new Uint8Array(await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv }, key, new TextEncoder().encode(text)
+      ));
+      const packed = new Uint8Array(salt.length + iv.length + ct.length);
+      packed.set(salt, 0);
+      packed.set(iv, salt.length);
+      packed.set(ct, salt.length + iv.length);
+      return MAGIC + b64encode(packed);
+    }
+    async function decryptPayload(seed, payload) {
+      if (!payload.startsWith(MAGIC)) return payload;
+      if (!seed) throw new Error('このQRは暗号化されています。シードを入力してください');
+      const raw = b64decode(payload.slice(MAGIC.length));
+      if (raw.length < 8 + 12 + 16) throw new Error('ペイロードが短すぎます');
+      const salt = raw.slice(0, 8);
+      const iv = raw.slice(8, 20);
+      const ct = raw.slice(20);
+      const key = await deriveKey(seed, salt);
+      let pt;
+      try {
+        pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+      } catch {
+        throw new Error('復号に失敗 (シードが違う可能性)');
+      }
+      return new TextDecoder().decode(pt);
+    }
+
+    // ---- Tabs ----
+    tabEncode.addEventListener('click', () => switchTab('encode'));
+    tabDecode.addEventListener('click', () => switchTab('decode'));
+    function switchTab(which) {
+      const enc = which === 'encode';
+      tabEncode.classList.toggle('active', enc);
+      tabDecode.classList.toggle('active', !enc);
+      encodeSection.classList.toggle('hidden', !enc);
+      decodeSection.classList.toggle('hidden', enc);
+      if (!enc && !stream) {
+        // no auto-start; user taps button (permission prompt UX)
+      }
+      if (enc) stopCamera();
+    }
+
+    // ---- Encode ----
+    const qrCanvas = $('qr-canvas');
+    const encodeStatus = $('encode-status');
+    $('encode-btn').addEventListener('click', async () => {
+      const text = $('plaintext').value;
+      if (!text) {
+        setStatus(encodeStatus, 'テキストが空です', 'err');
+        return;
+      }
+      setStatus(encodeStatus, '生成中...', '');
+      try {
+        const payload = await encryptText(seedInput.value.trim(), text);
+        await QRCode.toCanvas(qrCanvas, payload, {
+          errorCorrectionLevel: 'M',
+          margin: 2,
+          width: 320,
+          color: { dark: '#000000', light: '#ffffff' },
+        });
+        $('qr-wrap').classList.remove('hidden');
+        setStatus(encodeStatus,
+          seedInput.value.trim() ? `暗号化済 (${payload.length}文字)` : `プレーン (${payload.length}文字)`,
+          'ok');
+      } catch (e) {
+        setStatus(encodeStatus, 'エラー: ' + e.message, 'err');
+      }
+    });
+    $('encode-clear').addEventListener('click', () => {
+      $('plaintext').value = '';
+      $('qr-wrap').classList.add('hidden');
+      setStatus(encodeStatus, '', '');
+    });
+
+    // ---- Decode / camera ----
+    const video = $('camera');
+    const decodeCanvas = $('decode-canvas');
+    const decodeStatus = $('decode-status');
+    const resultBox = $('result');
+    const resultWrap = $('result-wrap');
+    let stream = null;
+    let rafId = null;
+
+    $('camera-start').addEventListener('click', startCamera);
+    $('camera-stop').addEventListener('click', stopCamera);
+    $('rescan-btn').addEventListener('click', () => {
+      resultWrap.classList.add('hidden');
+      startCamera();
+    });
+    $('copy-btn').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(resultBox.textContent);
+        setStatus(decodeStatus, 'コピーしました', 'ok');
+      } catch (e) {
+        setStatus(decodeStatus, 'コピー失敗: ' + e.message, 'err');
+      }
+    });
+
+    async function startCamera() {
+      try {
+        setStatus(decodeStatus, 'カメラ起動中...', '');
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
+        video.srcObject = stream;
+        await video.play();
+        $('camera-start').classList.add('hidden');
+        $('camera-stop').classList.remove('hidden');
+        setStatus(decodeStatus, 'QRをカメラに向けてください', '');
+        scanLoop();
+      } catch (e) {
+        setStatus(decodeStatus, 'カメラ起動失敗: ' + e.message, 'err');
+      }
+    }
+    function stopCamera() {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+      video.srcObject = null;
+      $('camera-start').classList.remove('hidden');
+      $('camera-stop').classList.add('hidden');
+    }
+    function scanLoop() {
+      if (!stream) return;
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        const w = video.videoWidth, h = video.videoHeight;
+        decodeCanvas.width = w;
+        decodeCanvas.height = h;
+        const ctx = decodeCanvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(video, 0, 0, w, h);
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const code = jsQR(imgData.data, w, h, { inversionAttempts: 'dontInvert' });
+        if (code && code.data) {
+          onDecoded(code.data);
+          return;
+        }
+      }
+      rafId = requestAnimationFrame(scanLoop);
+    }
+    async function onDecoded(payload) {
+      stopCamera();
+      setStatus(decodeStatus, '復号中...', '');
+      try {
+        const text = await decryptPayload(seedInput.value.trim(), payload);
+        resultBox.textContent = text;
+        resultWrap.classList.remove('hidden');
+        setStatus(decodeStatus, '完了', 'ok');
+      } catch (e) {
+        resultBox.textContent = payload;
+        resultWrap.classList.remove('hidden');
+        setStatus(decodeStatus, e.message, 'err');
+      }
+    }
+
+    // ---- helpers ----
+    function setStatus(el, msg, kind) {
+      el.textContent = msg;
+      el.classList.remove('ok', 'err');
+      if (kind) el.classList.add(kind);
+    }
+
+    // Graceful degradation messages
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      $('camera-start').disabled = true;
+      setStatus(decodeStatus, 'このブラウザはカメラ非対応', 'err');
+    }
+    if (!window.crypto || !window.crypto.subtle) {
+      setStatus($('seed-status'), 'Web Crypto非対応。HTTPS経由で開いてください', 'err');
+    }
+  })();
+  </script>
+</body>
+</html>
