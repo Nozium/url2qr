@@ -197,8 +197,10 @@
     AES-GCM (PBKDF2-SHA256, 100k iters) · <a href="https://github.com/nozium/url2qr" style="color: var(--muted);">url2qr</a>
   </footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"
+          onerror="this.onerror=null;this.src='https://unpkg.com/qrcode-generator@1.4.4/qrcode.js'"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"
+          onerror="this.onerror=null;this.src='https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'"></script>
   <script>
   (() => {
     const MAGIC = 'u2q1:';
@@ -305,21 +307,42 @@
     // ---- Encode ----
     const qrCanvas = $('qr-canvas');
     const encodeStatus = $('encode-status');
+    function renderQRToCanvas(qr, canvas, targetSize = 320, margin = 2) {
+      const count = qr.getModuleCount();
+      const cellSize = Math.max(2, Math.floor(targetSize / (count + margin * 2)));
+      const size = cellSize * (count + margin * 2);
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = '#000000';
+      for (let r = 0; r < count; r++) {
+        for (let c = 0; c < count; c++) {
+          if (qr.isDark(r, c)) {
+            ctx.fillRect((c + margin) * cellSize, (r + margin) * cellSize, cellSize, cellSize);
+          }
+        }
+      }
+    }
+
     $('encode-btn').addEventListener('click', async () => {
       const text = $('plaintext').value;
       if (!text) {
         setStatus(encodeStatus, 'テキストが空です', 'err');
         return;
       }
+      if (typeof qrcode !== 'function') {
+        setStatus(encodeStatus, 'QRライブラリの読み込みに失敗。リロードしてください', 'err');
+        return;
+      }
       setStatus(encodeStatus, '生成中...', '');
       try {
         const payload = await encryptText(seedInput.value.trim(), text);
-        await QRCode.toCanvas(qrCanvas, payload, {
-          errorCorrectionLevel: 'M',
-          margin: 2,
-          width: 320,
-          color: { dark: '#000000', light: '#ffffff' },
-        });
+        const qr = qrcode(0, 'M');
+        qr.addData(payload);
+        qr.make();
+        renderQRToCanvas(qr, qrCanvas, 320, 2);
         $('qr-wrap').classList.remove('hidden');
         setStatus(encodeStatus,
           seedInput.value.trim() ? `暗号化済 (${payload.length}文字)` : `プレーン (${payload.length}文字)`,
@@ -359,6 +382,10 @@
     });
 
     async function startCamera() {
+      if (typeof jsQR !== 'function') {
+        setStatus(decodeStatus, 'QR読取ライブラリの読み込みに失敗。リロードしてください', 'err');
+        return;
+      }
       try {
         setStatus(decodeStatus, 'カメラ起動中...', '');
         stream = await navigator.mediaDevices.getUserMedia({
